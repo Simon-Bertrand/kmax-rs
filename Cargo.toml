@@ -1,0 +1,18 @@
+[package]
+name = "kmax-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "kmax_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23.0", features = ["extension-module", "multiple-pymethods"] }
+numpy = {version = "*"}
+ndarray = { version = "0.16", features = ["rayon", "blas"] }
+blas-src = { version = "0.8", features = ["openblas"] }
+openblas-src = { version = "0.10", features = ["cblas", "system"] }
+rand = "0.9.0"
+num-traits = "0.2.19"
