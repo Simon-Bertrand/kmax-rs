@@ -10,6 +10,7 @@ use numpy::ndarray::Zip;
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::types::{PyAnyMethods, PyDict};
 use pyo3::{pymodule, types::PyModule, Bound, PyResult, Python};
+use rand::rng;
 use rand::Rng;
 
 trait ClampMin: Real + Borrow<Self> {
@@ -70,9 +71,15 @@ where
     let y_c = y.map(|x| (*x - means.1));
     let row_c_norm = norm_l2(row_c.iter().map(|&x| x));
     let y_c_norm = norm_l2(y_c.iter().map(|&x| x));
+    if row_c_norm < eps && y_c_norm < eps {
+        return if row == y { A::one() } else { A::zero() };
+    } else if row_c_norm < eps || y_c_norm < eps {
+        return A::zero();
+    }
+
     row_c
-        .map(|x| x.safe_divide(&row_c_norm, &A::zero(), Some(eps)))
-        .dot(&y_c.map(|x| x.safe_divide(&y_c_norm, &A::zero(), Some(eps))))
+        .map(|&x| x / row_c_norm)
+        .dot(&y_c.map(|&x| x / y_c_norm))
 }
 
 fn zncc_f64_backend(
@@ -213,9 +220,37 @@ impl Clustering {
             Clustering::init_random_centroids(k_clusters, data.ncols(), &min_vals, &max_vals);
         let mut clusters;
         let mut loop_count: usize = 0;
+        let mut rng = rand::rng();
+        let mut weights;
+        let mut weights_sum: f64;
+        let mut new_centroid;
+        let mut n_valid_clusters;
         loop {
             clusters = Clustering::predict_func(&data, &centroids.view()).1;
             centroids = Clustering::compute_centroids(&data, &clusters, &mut cluster_counts);
+
+            for (i, &count) in cluster_counts.iter().enumerate() {
+                if count == 0.0 {
+                    n_valid_clusters = cluster_counts.iter().filter(|&&count| count > 0.0).count();
+                    weights = (0..n_valid_clusters)
+                        .map(|_| rng.random_range(0.0..1.0))
+                        .collect::<Vec<f64>>();
+                    weights_sum = weights.iter().sum();
+                    new_centroid = centroids
+                        .rows()
+                        .into_iter()
+                        .zip(cluster_counts.iter())
+                        .filter(|(_, &count)| count > 0.0)
+                        .map(|(row, _)| row)
+                        .enumerate()
+                        .fold(
+                            ndarray::Array1::<f64>::zeros(data.ncols()),
+                            |acc, (k, x)| acc + weights[k] * &x,
+                        )
+                        .map(|x| x / weights_sum);
+                    centroids.row_mut(i).assign(&new_centroid);
+                }
+            }
             if let Some(eps) = inertia_eps {
                 let inertia =
                     Clustering::compute_inertia(&data, &centroids.view(), &clusters.view());
